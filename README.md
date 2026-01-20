@@ -8,4 +8,4 @@ You can adapt the code to any interval training structure.
 
 The Interval training session MUST be performed till exhaustion.
 
-If you are having any issues to understand the concept, the following article is a good place to begin: DOI: 10.1007/s40279-017-0688-0
+If you have any issues to understand the concept, the following article is a good place to begin: DOI: 10.1007/s40279-017-0688-0
