@@ -1,0 +1,169 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Valores
+CS = 3.76       # Critical Speed (m/s)
+Dprime_0 = 192.8      # D′ capacity in meters
+distancia = 200
+intervalo = 90
+rec = 0.1  # velocidade durante a recuperação (diferente de 0)
+
+rep1 = 5.13 #velocidade de cada repetição
+rep2 = 5.17
+rep3 = 5.17
+rep4 = 5.19
+rep5 = 5.28
+rep6 = 5.19
+rep7 = 5.51
+rep8 = 6.01
+
+tempo1 = distancia / rep1
+tempo2 = distancia / rep2
+tempo3 = distancia / rep3
+tempo4 = distancia / rep4
+tempo5 = distancia / rep5
+tempo6 = distancia / rep6
+tempo7 = distancia / rep7
+tempo8 = distancia / rep8
+
+tempos_reps = [
+    round(tempo1),
+    round(tempo2),
+    round(tempo3),
+    round(tempo4),
+    round(tempo5),
+    round(tempo6),
+    round(tempo7),
+    round(tempo8)
+]
+
+# --- Velocidade * tempo (1 Hz sampling) ---
+speed = np.array(
+    [rep1] * int(tempo1) +
+    [rec]*intervalo +
+    [rep2] * int(tempo2) +
+    [rec]*intervalo +
+    [rep3] * int(tempo3) +
+    [rec]*intervalo +
+    [rep4] * int(tempo4) +
+    [rec]*intervalo +
+    [rep5] * int(tempo5) +
+    [rec]*intervalo +
+    [rep6] * int(tempo6) +
+    [rec]*intervalo +
+    [rep7] * int(tempo7) +
+    [rec]*intervalo +
+    [rep8] * int(tempo8)
+)
+print(speed)
+time = np.arange(len(speed))  # 1 Hz sampling
+
+# --- Cálculo do D′ balance com uso/reconstituição por repetição ---
+
+def compute_dprime_balance(speed, time, CS, Dprime_0, tau):
+    Dprime = np.zeros(len(speed))
+    Dprime[0] = Dprime_0
+
+    dprime_usado = []
+    dprime_recup = []
+
+    # --- Cálculo contínuo de D′ ---
+    for i in range(1, len(speed)):
+        dt = 1
+        if speed[i] > CS:
+            Dprime[i] = Dprime[i - 1] - (speed[i] - CS) * dt
+            print("D balance TIRO= ", Dprime[i])
+        else:
+            Dprime[i] = Dprime[i - 1] + (1 - np.exp(-dt / tau)) * (Dprime_0 - Dprime[i - 1])
+            print("D balance RECUPERAÇÃO= ", Dprime[i])
+        Dprime[i] = max(0, min(Dprime[i], Dprime_0))
+
+    # --- Cálculo de uso e recuperação de D′ por repetição ---
+    idx = 0
+    velocidades = [rep1, rep2, rep3, rep4, rep5, rep6, rep7, rep8]
+    print("\nD′ usado e reconstituído por repetição:")
+    for n, dur in enumerate(tempos_reps):
+        i_tiro_ini = idx
+        i_tiro_fim = i_tiro_ini + dur
+        i_rec_ini = i_tiro_fim
+        i_rec_fim = i_rec_ini + intervalo
+
+        if i_tiro_fim >= len(Dprime):
+            break
+
+        # D′ usado por simulação (SKIBA)
+        d_usado_sim = Dprime[i_tiro_ini] - Dprime[i_tiro_fim - 1]
+
+        # D′ reconstituído
+        if i_rec_fim < len(Dprime):
+            d_recup = Dprime[i_rec_fim - 1] - Dprime[i_tiro_fim - 1]
+        else:
+            d_recup = np.nan
+
+        #D′_teórico = (v - CS) * tempo original
+        v = velocidades[n]
+        dprime_teorico = (v - CS) * dur if v > CS else 0
+        erro = d_usado_sim - dprime_teorico
+
+        dprime_usado.append(d_usado_sim)
+        dprime_recup.append(d_recup)
+
+        print(f"Rep {n+1}:")
+        print(f"   D′ SKIBA usado = {d_usado_sim:.2f} m")
+        print(f"   D′ original (v>CS) = {dprime_teorico:.2f} m")
+        print(f"   D′ reconstituído = {d_recup:.2f} m")
+        print(f"   Erro (SKIBA - original) = {erro:+.2f} m")
+
+        idx = i_rec_fim
+
+    return Dprime
+
+# --- Tau optimization ---
+def find_tau(target_dprime=0, tolerance=Dprime_0*0.05, max_iter=1000):
+    tau_guess = 244
+
+    for _ in range(max_iter):
+        Dprime_series = compute_dprime_balance(speed, time, CS, Dprime_0, tau_guess)
+        final_dprime = Dprime_series[-1]
+
+        if abs(final_dprime - target_dprime) < tolerance:
+            return tau_guess, Dprime_series
+
+        if final_dprime > target_dprime:
+            tau_guess  # tau está alto demais → recuperação rápida
+
+
+    return None, None
+
+# --- Run estimation ---
+tau_estimated, Dprime_series = find_tau()
+print("Tau = ", tau_estimated)
+
+if tau_estimated is not None:
+    # Gráfico sobreposto
+    fig, ax1 = plt.subplots(figsize=(12, 5))
+
+    # Velocidade
+    color1 = 'tab:blue'
+    ax1.set_xlabel('Tempo (s)')
+    ax1.set_ylabel('Velocidade (m/s)', color=color1)
+    ax1.plot(time, speed, color=color1, label='Velocidade (m/s)')
+    ax1.axhline(CS, color='gray', linestyle='--', label='Velocidade Crítica (CS)')
+    ax1.tick_params(axis='y', labelcolor=color1)
+    ax1.legend(loc='upper left')
+
+    # W'_BAL
+    ax2 = ax1.twinx()
+    color2 = 'tab:red'
+    ax2.set_ylabel("$D'_{BAL}$ (m)", color=color2)
+    ax2.plot(time, Dprime_series, color=color2, label=f"D′ Balance (τ = {tau_estimated:.2f}s)")
+    ax2.axhline(0, color='black', linestyle='--')
+    ax2.tick_params(axis='y', labelcolor=color2)
+    ax2.legend(loc='upper right')
+
+    plt.title("Velocidade vs. $D'_{BAL}$ ao Longo do Tempo")
+    plt.tight_layout()
+    plt.show()
+
+else:
+    print("Tau did not converge")
